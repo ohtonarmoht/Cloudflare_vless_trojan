@@ -25,6 +25,12 @@ else
 echo "未安装任何节点"
 fi
 }
+delsystem(){
+systemctl stop "cf_$port.service" >/dev/null 2>&1
+systemctl disable "cf_$port.service" >/dev/null 2>&1
+rm -f "/etc/systemd/system/cf_$port.service"
+systemctl daemon-reload >/dev/null 2>&1
+}
 echo "================================================================"
 echo "甬哥Github项目 ：github.com/yonggekkk"
 echo "甬哥Blogger博客 ：ygkkk.blogspot.com"
@@ -75,7 +81,21 @@ echo
 SCRIPT="$HOME/cfs5http/cf_$port.sh"
 cat > "$SCRIPT" << EOF
 #!/bin/bash
-nohup $HOME/cfs5http/cfwp client_ip=:"$port" dns="$dns" cf_domain="$cf_domain" cf_cdnip="$cf_cdnip" token="$token" enable_ech="$enable_ech" cnrule="$cnrule" > "$HOME/cfs5http/$port.log" 2>&1 &
+INIT_SYSTEM=\$(cat /proc/1/comm)
+CMD="$HOME/cfs5http/cfwp \
+client_ip=:$port \
+dns=$dns \
+cf_domain=$cf_domain \
+cf_cdnip=$cf_cdnip \
+token=$token \
+enable_ech=$enable_ech \
+cnrule=$cnrule"
+LOG="$HOME/cfs5http/$port.log"
+if [ "\$INIT_SYSTEM" = "systemd" ]; then
+exec \$CMD
+else
+nohup \$CMD > "\$LOG" 2>&1 &
+fi
 EOF
 chmod +x "$SCRIPT"
 INIT_SYSTEM=$(cat /proc/1/comm)
@@ -85,6 +105,7 @@ cat > "/etc/systemd/system/cf_$port.service" << EOF
 Description=CF $port Service
 After=network.target
 [Service]
+Type=simple
 ExecStart=/bin/bash $SCRIPT
 Restart=always
 [Install]
@@ -95,10 +116,11 @@ systemctl start "cf_$port.service" >/dev/null 2>&1
 systemctl enable "cf_$port.service" >/dev/null 2>&1
 elif [ "$INIT_SYSTEM" = "procd" ]; then
 RCLOCAL="/etc/rc.local"
-[ ! -f "$RCLOCAL" ] && touch "$RCLOCAL"
-sed -i "/^exit 0/i \/bin\/bash $SCRIPT" "$RCLOCAL"
-fi
+[ ! -f "$RCLOCAL" ] && echo -e "#!/bin/sh\nexit 0" > "$RCLOCAL"; grep -q "$SCRIPT" "$RCLOCAL" || (grep -q "^exit 0" "$RCLOCAL" && sed -i "/^exit 0/i /bin/bash $SCRIPT" "$RCLOCAL" || echo "/bin/bash $SCRIPT" >> "$RCLOCAL"); tail -n1 "$RCLOCAL" | grep -q "^exit 0" || echo "exit 0" >> "$RCLOCAL"
 bash "$SCRIPT"
+else
+bash "$SCRIPT"
+fi
 echo "安装完毕，Socks5/Http节点已在运行中，可进入菜单选择2，查看节点配置信息及日志" && sleep 5
 echo
 until grep -q '服务端域名与端口\|客户端地址与端口\|运行中的优选IP' "$HOME/cfs5http/$port.log"; do sleep 1; done; head -n 16 "$HOME/cfs5http/$port.log" | grep '服务端域名与端口\|客户端地址与端口\|运行中的优选IP'
@@ -114,9 +136,7 @@ echo
 read -p "选择要删除的端口节点（输入端口即可）:" port
 pid=$(lsof -t -i :$port)
 if [ -n "$pid" ]; then
-systemctl stop "cf_$port.service" >/dev/null 2>&1
-systemctl disable "cf_$port.service" >/dev/null 2>&1
-rm -rf "/etc/systemd/system/cf_$port.service"
+delsystem
 kill -9 $pid >/dev/null 2>&1
 echo "端口 $port 的进程已被终止"
 else
@@ -128,11 +148,8 @@ showmenu
 if [ -n "$files" ]; then
 while IFS= read -r port; do
 echo "$port"
-systemctl stop "cf_$port.service" >/dev/null 2>&1
-systemctl disable "cf_$port.service" >/dev/null 2>&1
-rm -f "/etc/systemd/system/cf_$port.service"
+delsystem
 done <<< "$files"
-systemctl daemon-reload
 fi
 ps | grep '[c]fwp' | awk '{print $1}' | xargs kill -9
 rm -rf "$HOME/cfs5http" cfsh.sh
